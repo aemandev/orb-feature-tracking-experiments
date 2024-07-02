@@ -150,8 +150,6 @@ int main(int argc, char** argv) {
         bundleAdjustmentG2O(points_3d, points_2d, K, pose_g2o);
         std::cout << "Pose by g2o: \n" << pose_g2o.matrix() << std::endl;
 
-
-
     }
 
     return 0;
