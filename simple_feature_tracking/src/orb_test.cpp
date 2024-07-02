@@ -7,6 +7,7 @@
 // C++ imports
 #include <ORB_helper_functions.hpp>
 #include <iostream>
+#include <nonlinear_optimization.hpp>
 
 
 inline cv::Scalar get_color(float depth) {
@@ -41,7 +42,10 @@ int main(int argc, char** argv) {
     }
 
     // Initialize orb
+    // cv::Ptr<cv::ORB> detector = cv::ORB::create(n_features);
     cv::Ptr<cv::ORB> detector = cv::ORB::create(n_features);
+    cv::Ptr<cv::DescriptorExtractor> descriptor = cv::ORB::create();
+
     // cv::Ptr<cv::
     std::vector<cv::KeyPoint> kp1, kp2;
 
@@ -50,7 +54,6 @@ int main(int argc, char** argv) {
         find_ORB_features_grid(image1_resize, kp1, n_features, num_grids);
         find_ORB_features_grid(image2_resize, kp2, n_features, num_grids);
     } else {
-
         detector->detect(image1_resize, kp1);  
         detector->detect(image2_resize, kp2);
     }
@@ -121,12 +124,34 @@ int main(int argc, char** argv) {
         // print
         // std::cout << "3d-2d pairs: " << pts3d.size() << std::endl;
         // std::cout << "3d points: " << pts3d << std::endl;
+
         cv::Mat r,t;
         cv::solvePnP(pts3d, pts2d, K, cv::Mat(), r, t);
         cv::Mat R_pnp;
         cv::Rodrigues(r, R_pnp);
         std::cout << "R_pnp = " << R_pnp << std::endl;
         std::cout << "t_pnp: " << t << std::endl;
+
+        // Perform bundle adjustment
+        VecVector3d points_3d;
+        VecVector2d points_2d;
+        for (int i = 0; i < pts3d.size(); i++){
+            points_3d.push_back(Eigen::Vector3d(pts3d[i].x, pts3d[i].y, pts3d[i].z));
+            points_2d.push_back(Eigen::Vector2d(pts2d[i].x, pts2d[i].y));
+        }
+        Sophus::SE3d pose_gn;
+        // Print SE3    
+        // std::cout << "SE3: " << SE3_Rt;
+        bundle_adjustment_gauss_newton(points_3d,
+        points_2d, K, pose_gn);
+        std::cout << "Pose by bundle adjustment: \n" << pose_gn.matrix() << std::endl;
+
+        Sophus::SE3d pose_g2o;
+        bundleAdjustmentG2O(points_3d, points_2d, K, pose_g2o);
+        std::cout << "Pose by g2o: \n" << pose_g2o.matrix() << std::endl;
+
+
+
     }
 
     return 0;

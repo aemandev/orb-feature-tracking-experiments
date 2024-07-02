@@ -1,5 +1,4 @@
 #include <ORB_helper_functions.hpp>
-#include <nonlinear_optimization.hpp>
 #include <opencv2/features2d.hpp>
 
 void find_ORB_features_grid(cv::Mat& image, std::vector<cv::KeyPoint>& keypoints, int n_features, int grid_size){
@@ -11,7 +10,7 @@ void find_ORB_features_grid(cv::Mat& image, std::vector<cv::KeyPoint>& keypoints
     int move_row_size = img_rows / grid_size;
     int move_col_size = img_cols / grid_size; 
 
-    cv::Ptr<cv::ORB> detector = cv::ORB::create(n_features);
+    cv::Ptr<cv::ORB> detector = cv::ORB::create(n_features/ grid_size / grid_size);
     for (int i = 0; i < grid_size; i++){
         for (int j = 0; j < grid_size; j++){
             // std::cout << "Processing cell " << i << " " << j << std::endl;
@@ -36,17 +35,39 @@ void find_ORB_features_grid(cv::Mat& image, std::vector<cv::KeyPoint>& keypoints
 }
 
 void match_orb_features(const cv::Mat&desc1, const cv::Mat& desc2, std::vector<cv::DMatch>& matches){
-    cv::BFMatcher matcher(cv::NORM_HAMMING);
-    std::vector<std::vector<cv::DMatch>> knn_matches;
-    matcher.knnMatch(desc1, desc2, knn_matches, 2);
+    // cv::BFMatcher matcher(cv::NORM_HAMMING);
+    
+    // std::vector<std::vector<cv::DMatch>> knn_matches;
+    // matcher.knnMatch(desc1, desc2, knn_matches, 2);
 
-    const float ratio_thresh = 0.7f;
-    for (size_t i = 0; i < knn_matches.size(); i++){
-        if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance){
-            matches.push_back(knn_matches[i][0]);
+    // const float ratio_thresh = 0.7f;
+    // for (size_t i = 0; i < knn_matches.size(); i++){
+    //     if (knn_matches[i][0].distance < ratio_thresh * knn_matches[i][1].distance){
+    //         matches.push_back(knn_matches[i][0]);
+    //     }
+    // }
+    // std::sort(matches.begin(), matches.end());
+    cv::Ptr<cv::DescriptorMatcher> matcher = cv::DescriptorMatcher::create("BruteForce-Hamming");
+    std::vector<cv::DMatch> match;
+    matcher->match(desc1, desc2, match);
+
+    double min_dist = 10000, max_dist = 0;
+
+    for (int i = 0; i < desc1.rows; i++) {
+        double dist = match[i].distance;
+        if (dist < min_dist) min_dist = dist;
+        if (dist > max_dist) max_dist = dist;
+    }
+
+    printf("-- Max dist : %f \n", max_dist);
+    printf("-- Min dist : %f \n", min_dist);
+
+    for (int i = 0; i < desc1.rows; i++) {
+        if (match[i].distance <= cv::max(2 * min_dist, 30.0)) {
+        matches.push_back(match[i]);
         }
     }
-    std::sort(matches.begin(), matches.end());
+
 }
 
 void calculate_fundamental_matrix(const cv::Mat& K, const std::vector<cv::KeyPoint>& kp1, const std::vector<cv::KeyPoint>& kp2,
