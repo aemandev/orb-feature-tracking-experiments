@@ -106,19 +106,25 @@ int main(int argc, char** argv) {
     cv::imshow("img 2", img2_plot);
     cv::waitKey();
 
-    if ( argc == 8 ) {
+    if ( argc == 9 ) {
         cv::Mat depth_map = cv::imread(argv[7], CV_LOAD_IMAGE_UNCHANGED);
+        cv::Mat depth_map2 = cv::imread(argv[8], CV_LOAD_IMAGE_UNCHANGED);
         std::vector<cv::Point3f> pts3d;
+        std::vector<cv::Point3f> pts3d2;
         std::vector<cv::Point2f> pts2d;
 
         for (cv::DMatch m:matches){
             ushort d = depth_map.ptr<unsigned short>(int(kp1[m.queryIdx].pt.y))[int(kp1[m.queryIdx].pt.x)];
-            if (d==0){
+            ushort d2 = depth_map2.ptr<unsigned short>(int(kp2[m.trainIdx].pt.y))[int(kp2[m.trainIdx].pt.x)];
+            if (d==0 || d2 == 0){
                 continue;
             }
             float dd = d / 5000.0;
+            float dd2 = d2 / 5000.0;
             cv::Point2d pt1 = pixel2cam(kp1[m.queryIdx].pt, K);
+            cv::Point2d pt2 = pixel2cam(kp2[m.trainIdx].pt, K);
             pts3d.push_back(cv::Point3f(pt1.x*dd, pt1.y*dd, dd));
+            pts3d2.push_back(cv::Point3f(pt2.x*dd2, pt2.y*dd2, dd2));
             pts2d.push_back(cv::Point2f(kp2[m.trainIdx].pt));
         }
         // print
@@ -150,6 +156,15 @@ int main(int argc, char** argv) {
         bundleAdjustmentG2O(points_3d, points_2d, K, pose_g2o);
         std::cout << "Pose by g2o: \n" << pose_g2o.matrix() << std::endl;
 
+        // Perform ICP using SVD first
+        cv::Mat R_svd, t_svd;
+        pose_estimation_3d3d(pts3d, pts3d2, R_svd, t_svd);
+
+        // Bundle adjustment
+        cv::Mat R_ba, t_ba;
+        bundle_adjustment_3d3d(pts3d, pts3d2, 
+            R_ba, t_ba);
+        
     }
 
     return 0;

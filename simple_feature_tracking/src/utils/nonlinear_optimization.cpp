@@ -126,6 +126,30 @@ class EdgeProjection : public g2o::BaseUnaryEdge<2, Eigen::Vector2d, VertexPose>
     Eigen::Matrix3d _K;
 };
 
+class EdgeProjectXYZRGBDPoseOnly : public g2o::BaseUnaryEdge<3, Eigen::Vector3d, VertexPose>{
+    public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+
+    EdgeProjectXYZRGBDPoseOnly(const Eigen::Vector3d &point) : _point(point) {}
+
+    virtual void computeError() override {
+        const VertexPose *pose = static_cast<const VertexPose * > ( _vertices[0] );
+        _error = _measurement - pose->estimate() * _point;
+    }
+    
+    virtual void linearizeOplus() override {
+        VertexPose *pose = static_cast<VertexPose *>(_vertices[0]);
+        Sophus::SE3d T = pose->estimate();
+        Eigen::Vector3d xyz_trans = T * _point;
+        _jacobianOplusXi.block<3,3>(0,0) = -Eigen::Matrix3d::Identity();
+        _jacobianOplusXi.block<3,3>(0,3) = Sophus::SO3d::hat(xyz_trans);
+    }
+    virtual bool read(std::istream &in) override {}
+    virtual bool write(std::ostream &out) const override {}
+    protected:
+    Eigen::Vector3d _point;
+};
+
 
 
 void bundleAdjustmentG2O(const VecVector3d &points_3d, const VecVector2d &points_2d,
@@ -178,4 +202,98 @@ const cv::Mat &K, Sophus::SE3d &pose) {
     // std::cout << "optimization costs time: " << time_used.count() << " seconds." << std::endl;
     std::cout << "Pose estimated by g2o = \n" << vertex_pose->estimate().matrix() << std::endl;
     pose = vertex_pose->estimate();
+}
+
+
+void pose_estimation_3d3d(const std::vector<cv::Point3f> &pts1, const std::vector<cv::Point3f> &pts2, cv::Mat &R, cv::Mat &t){
+    cv::Point3f p1, p2; // Center of mass
+    int N = pts1.size();
+    for (int i = 0; i < N; i++){
+        p1 += pts1[i];
+        p2 += pts2[i];
+    }
+    p1 = cv::Point3f(cv::Vec3f(p1) / N);
+    p2 = cv::Point3f(cv::Vec3f(p2) / N);
+
+    std::vector<cv::Point3f> q1(N), q2(N); // Remove the center
+    for (int i = 0; i < N; i++){
+        q1[i] = pts1[i] - p1;
+        q2[i] = pts2[i] - p2;   
+    }
+    // Compute qq1*q2^T
+    Eigen::Matrix3d W = Eigen::Matrix3d::Zero();
+    for (int i= 0; i < N; i++){
+        W+= Eigen::Vector3d(q1[i].x, q1[i].y, q1[i].z) * Eigen::Vector3d(q2[i].x, q2[i].y, q2[i].z).transpose();
+    }
+    std::cout << "W = " << W << std::endl;
+
+    // Then do SVD on W
+    Eigen::JacobiSVD<Eigen::Matrix3d> svd(W, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    Eigen::Matrix3d U = svd.matrixU();
+    Eigen::Matrix3d V = svd.matrixV();
+
+    std::cout << "U = " << U << std::endl;
+    std::cout << "V = " << V << std::endl;
+
+    Eigen::Matrix3d R_ = U*V.transpose();
+    if (R_.determinant() < 0){
+        R_ = -R_;
+    }
+    Eigen::Vector3d t_ = Eigen::Vector3d(p1.x, p1.y, p1.z) - R_ * Eigen::Vector3d(p2.x, p2.y, p2.z);
+    // Convert to cv::Mat
+    R = (cv::Mat_<double>(3, 3) <<
+        R_(0,0), R_(0,1), R_(0,2),
+        R_(1,0), R_(1,1), R_(1,2),
+        R_(2,0), R_(2,1), R_(2,2)
+    );
+    cv::Mat R_inv;
+    cv::Mat t_inv;
+    R_inv = R.t();
+    std::cout << "R = " << R << std::endl;
+    std::cout << "R_inv = " << R_inv << std::endl;
+    t = (cv::Mat_<double>(3, 1) << t_(0,0), t_(1,0), t_(2,0));   
+    t_inv = -R_inv * t;
+    std::cout << "t = " << t << std::endl;
+    std::cout << "t_inv = " << t_inv << std::endl;
+}
+
+void bundle_adjustment_3d3d(const std::vector<cv::Point3f> &pts1, const std::vector<cv::Point3f> &pts2, 
+cv::Mat &R, cv::Mat &t){
+    typedef g2o::BlockSolverX BlockSolverType;
+    typedef g2o::LinearSolverDense<BlockSolverType::PoseMatrixType> LinearSolverType;
+
+    auto solver = new g2o::OptimizationAlgorithmLevenberg(
+        g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));
+    g2o::SparseOptimizer optimizer;
+    optimizer.setAlgorithm(solver);
+    optimizer.setVerbose(true);
+
+    // Vertex
+    VertexPose *pose = new VertexPose();
+    pose->setId(0);
+    pose->setEstimate(Sophus::SE3d());
+    optimizer.addVertex(pose);
+
+    //Edges
+    for (size_t i=0; i< pts1.size(); i++){
+        EdgeProjectXYZRGBDPoseOnly *edge = new EdgeProjectXYZRGBDPoseOnly(
+            Eigen::Vector3d(pts2[i].x, pts2[i].y, pts2[i].z));
+        edge->setVertex(0, pose);
+        edge->setMeasurement(Eigen::Vector3d(
+            pts1[i].x, pts1[i].y, pts1[i].z));
+        edge->setInformation(Eigen::Matrix3d::Identity());
+        optimizer.addEdge(edge);
+    }
+
+    optimizer.initializeOptimization();
+    optimizer.optimize(10);
+    std::cout << "Pose estimated by g2o = \n" << pose->estimate().matrix() << std::endl;
+    Eigen::Matrix3d R_ = pose->estimate().rotationMatrix();
+    Eigen::Vector3d t_ = pose->estimate().translation();
+    R = (cv::Mat_<double>(3, 3) <<
+        R_(0,0), R_(0,1), R_(0,2),
+        R_(1,0), R_(1,1), R_(1,2),
+        R_(2,0), R_(2,1), R_(2,2)
+    );
+    t = (cv::Mat_<double>(3, 1) << t_(0,0), t_(1,0), t_(2,0));
 }

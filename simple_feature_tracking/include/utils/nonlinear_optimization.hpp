@@ -13,6 +13,7 @@
 #include <g2o/core/block_solver.h>
 #include <g2o/core/solver.h>
 #include <g2o/core/optimization_algorithm_gauss_newton.h>
+#include <g2o/core/optimization_algorithm_levenberg.h>
 #include <g2o/solvers/dense/linear_solver_dense.h>
 #include <sophus/se3.hpp>
 
@@ -22,6 +23,9 @@ typedef std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> 
 
 void bundle_adjustment_gauss_newton(const VecVector3d &points_3d, const VecVector2d &points_2d, const cv::Mat &K, Sophus::SE3d &pose);
 void bundleAdjustmentG2O(const VecVector3d &points_3d, const VecVector2d &points_2d, const cv::Mat &K, Sophus::SE3d &pose);
+void pose_estimation_3d3d(const std::vector<cv::Point3f> &pts1, const std::vector<cv::Point3f> &pts2, cv::Mat &R, cv::Mat &t);
+void bundle_adjustment_3d3d(const std::vector<cv::Point3f> &pts1, const std::vector<cv::Point3f> &pts2, cv::Mat &R, cv::Mat &t);
+
 
 
 #endif // FEATURE_EXTRACTION_H
